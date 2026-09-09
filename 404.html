@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#E2D3C4">
+<meta name="robots" content="noindex">
+<title>Страница не найдена — клуб «Вечная фаза»</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400&family=Manrope:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+:root{ --cyc:#E2D3C4; --gold:#C6A46B; --rose:#B76E79; --berry:#D84374; --ink:#3A2F2A; }
+*{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+body{
+  margin:0; min-height:100vh; min-height:100svh;
+  background:var(--cyc); color:var(--ink);
+  font-family:Manrope, system-ui, sans-serif;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  text-align:center; padding:2rem 1.5rem;
+  -webkit-font-smoothing:antialiased;
+}
+.mark{
+  width:52px; height:52px; margin-bottom:2.5rem;
+  background:var(--gold);
+  -webkit-mask:url('sveta_img/logo.svg') center/contain no-repeat;
+          mask:url('sveta_img/logo.svg') center/contain no-repeat;
+}
+h1{
+  font-family:"Cormorant Garamond", Georgia, serif;
+  text-transform:uppercase; letter-spacing:.14em; font-weight:400;
+  font-size:clamp(1.5rem, 6vw, 2.6rem);
+  line-height:1.15; margin:0 0 1.1rem;
+}
+p{ font-size:.9rem; color:rgba(58,47,42,.6); margin:0 0 2.5rem; max-width:34ch; line-height:1.6; }
+a{
+  display:inline-flex; align-items:center; justify-content:center;
+  min-height:48px; padding:0 2.2rem;
+  background:var(--berry); color:#FFF8F0;
+  font-weight:600; font-size:.86rem; letter-spacing:.05em;
+  text-decoration:none; border-radius:999px;
+  box-shadow:0 10px 26px -12px rgba(216,67,116,.75);
+  transition:background-color .25s ease, transform .25s ease;
+}
+a:hover{ background:#c53a68; }
+a:active{ transform:scale(.975); }
+.rule{ width:1px; height:56px; margin:3rem 0 0;
+  background:linear-gradient(to bottom, rgba(198,164,107,.5), rgba(198,164,107,0)); }
+</style>
+</head>
+<body>
+  <span class="mark" aria-hidden="true"></span>
+  <h1>Страница не найдена</h1>
+  <p>Похоже, такой страницы здесь нет. Вернитесь к акции — она ещё идёт.</p>
+  <a href="./">На главную</a>
+  <span class="rule" aria-hidden="true"></span>
+</body>
+</html>

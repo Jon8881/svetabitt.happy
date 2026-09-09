@@ -1,0 +1,1407 @@
+<!doctype html>
+<!--
+═══════════════════════════════════════════════════════════════════════════
+  КАК КОДИРОВАТЬ MP4 ДЛЯ СКРОЛЛ-СКРАБА (особенно iOS Safari)
+═══════════════════════════════════════════════════════════════════════════
+  Скролл-скраб = браузер постоянно прыгает по video.currentTime.
+  Быстрый seek возможен только к keyframe. Поэтому нужны ЧАСТЫЕ keyframes
+  и H.264 (HEVC/H.265 не играет в Chrome на Windows и в Firefox вообще).
+
+  ffmpeg -i input.mp4 \
+    -c:v libx264 -profile:v main -pix_fmt yuv420p \
+    -g 12 -keyint_min 12 -sc_threshold 0 \
+    -crf 23 -preset slow \
+    -movflags +faststart \
+    -an \
+    output.mp4
+
+  -g 12 / -keyint_min 12 / -sc_threshold 0 — keyframe каждые 12 кадров (~0.5с при 24fps)
+  -movflags +faststart   — moov atom в начало файла, видео стартует без полной загрузки
+  -pix_fmt yuv420p       — обязательно для Safari
+  -an                    — звук не нужен, ролик всё равно muted
+  Цель по весу: 3–6 МБ на ролик. Всё что тяжелее — hero будет тормозить.
+═══════════════════════════════════════════════════════════════════════════
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#E2D3C4">
+
+<title>Акция в честь дня рождения Светланы Битт | клуб «Вечная фаза»</title>
+<meta name="description" content="Праздничное продление доступа в клуб «Вечная фаза» на специальных условиях. Только для действующих резидентов. Пакет 3+1: три месяца доступа, четвёртый в подарок.">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Акция в честь дня рождения Светланы Битт">
+<meta property="og:description" content="Праздничное продление доступа в клуб «Вечная фаза». Только для резидентов.">
+<meta property="og:image" content="sveta_img/hero_poster_pc.jpg">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        cyc:    '#E2D3C4',  /* фон циклорамы */
+        gold:   '#C6A46B',  /* шампань / золото */
+        rose:   '#B76E79',  /* пудрово-розовое золото */
+        berry:  '#D84374',  /* кнопки */
+        ink:    '#3A2F2A'   /* текст */
+      },
+      fontFamily: {
+        display: ['"Cormorant Garamond"', 'Georgia', 'serif'],
+        sans:    ['Manrope', 'system-ui', 'sans-serif']
+      }
+    }
+  }
+};
+</script>
+
+<script>
+/* Ставим флаг до первой отрисовки: контент прячется только если JS работает.
+   Аварийный таймер вернёт его, если GSAP так и не приехал. */
+document.documentElement.classList.add('js-ready');
+setTimeout(function () {
+  if (window.gsap && window.ScrollTrigger) return;
+  // GSAP не приехал: показываем контент и убираем прелоадер,
+  // иначе страница осталась бы навсегда за заставкой.
+  document.documentElement.classList.remove('js-ready');
+  var pre = document.getElementById('preloader');
+  if (pre) pre.remove();
+}, 3500);
+</script>
+
+<style>
+:root{
+  --cyc:#E2D3C4; --gold:#C6A46B; --rose:#B76E79;
+  --berry:#D84374; --ink:#3A2F2A;
+  --glass:rgba(255,248,240,.55);
+  --glass-brd:rgba(183,110,121,.25);
+}
+
+*{ -webkit-tap-highlight-color:transparent; }
+
+html{ scroll-behavior:smooth; background:var(--cyc); }
+
+body{
+  margin:0;
+  background:var(--cyc);
+  color:var(--ink);
+  font-family:Manrope, system-ui, sans-serif;
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior-y:none;      /* аккуратный iOS rubber-band */
+}
+
+.font-display{ font-family:"Cormorant Garamond", Georgia, serif; }
+
+/* ── Заголовки: uppercase + широкий tracking ─────────────────── */
+.h-display{
+  font-family:"Cormorant Garamond", Georgia, serif;
+  text-transform:uppercase;
+  letter-spacing:.14em;
+  font-weight:400;
+  line-height:1.08;
+  text-wrap:balance;
+  /* Без этого Cormorant рисует старостильные цифры: 3 и 1 уезжают
+     ниже базовой линии и «ПАКЕТ 3 + 1» выглядит съехавшим. */
+  font-variant-numeric:lining-nums;
+  font-feature-settings:"lnum" 1;
+}
+
+/* ── Glass-карточка ──────────────────────────────────────────── */
+.glass{
+  background:var(--glass);
+  border:1px solid var(--glass-brd);
+  backdrop-filter:blur(14px) saturate(115%);
+  -webkit-backdrop-filter:blur(14px) saturate(115%);
+  box-shadow:0 1px 2px rgba(58,47,42,.04), 0 12px 32px -20px rgba(58,47,42,.22);
+}
+
+/* ═══ HERO ══════════════════════════════════════════════════════ */
+#hero{ position:relative; height:250vh; }
+@media (max-width:767px){ #hero{ height:220vh; } }
+
+.hero-sticky{
+  position:sticky; top:0;
+  height:100vh; height:100svh;
+  overflow:hidden;
+  background:var(--cyc);
+}
+
+#heroVideo{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  object-fit:cover;
+  object-position:center center;
+  background:var(--cyc);
+  will-change:auto;
+}
+/* mobile: лицо в верхней трети кадра */
+@media (max-width:767px){
+  #heroVideo{ object-position:center 18%; }
+}
+
+/* Постер-подложка: видна пока видео не готово — никогда не чёрный экран */
+#heroPoster{
+  position:absolute; inset:0;
+  width:100%; height:100%;
+  object-fit:cover;
+  object-position:center center;
+  z-index:1;
+  transition:opacity .45s ease;
+}
+@media (max-width:767px){ #heroPoster{ object-position:center 18%; } }
+#heroPoster.is-hidden{ opacity:0; }
+
+/* Градиентная вуаль снизу — scaleY, не height (GPU-friendly) */
+#heroVeil{
+  position:absolute; left:0; right:0; bottom:0;
+  height:55%;
+  z-index:2;
+  transform:scaleY(0);
+  transform-origin:bottom center;
+  background:linear-gradient(to top,
+    rgba(58,47,42,.88) 0%,
+    rgba(58,47,42,.74) 28%,
+    rgba(58,47,42,.46) 58%,
+    rgba(58,47,42,.16) 82%,
+    rgba(58,47,42,0)   100%);
+  pointer-events:none;
+}
+
+/* ── Шапка hero: логотип + название клуба ─────────────────────
+   Прижата к верху кадра, поэтому не конкурирует с .hero-ui внизу. */
+.hero-top{
+  position:absolute; top:0; left:0; right:0;
+  z-index:3;
+  display:flex; align-items:center; gap:.6rem;
+  padding:calc(1rem + env(safe-area-inset-top)) 1.25rem 0;
+  pointer-events:none;
+}
+
+/* Тонкая золотая черта между знаком и текстом: превращает пару
+   в осознанный логотип-локап, а не в два случайно стоящих объекта. */
+.hero-rule{
+  flex:none;
+  width:1px;
+  align-self:stretch;
+  background:linear-gradient(to bottom,
+    rgba(255,248,240,0), rgba(255,248,240,.55), rgba(255,248,240,0));
+}
+
+/* Логотип красим через mask — SVG остаётся одним файлом,
+   а цвет задаётся из CSS под любой фон. */
+.hero-logo{
+  flex:none;
+  width:34px; height:34px;
+  background:#FFF8F0;
+  -webkit-mask:url('sveta_img/logo.svg') center/contain no-repeat;
+          mask:url('sveta_img/logo.svg') center/contain no-repeat;
+  filter:drop-shadow(0 2px 10px rgba(58,47,42,.45));
+}
+@media (min-width:768px){ .hero-logo{ width:40px; height:40px; } }
+
+.hero-club{
+  font-family:Manrope, sans-serif;
+  font-size:.54rem;
+  font-weight:500;
+  letter-spacing:.18em;
+  text-transform:uppercase;
+  color:rgba(255,248,240,.92);
+  text-shadow:0 1px 10px rgba(58,47,42,.65);
+  line-height:1.45;
+  /* Перенос задан вручную в разметке, поэтому ограничитель не нужен */
+  max-width:none;
+}
+@media (min-width:768px){ .hero-club{ font-size:.62rem; letter-spacing:.2em; } }
+
+/* ── Портрет в блоке цитаты ───────────────────────────────────── */
+.portrait-frame{
+  border:1px solid rgba(198,164,107,.45);
+  box-shadow:0 1px 2px rgba(58,47,42,.05), 0 24px 60px -34px rgba(58,47,42,.4);
+  background:var(--cyc);
+}
+.portrait-frame img{
+  display:block; width:100%; height:auto;
+  aspect-ratio:3/4; object-fit:cover;
+}
+
+/* ── Цитата ───────────────────────────────────────────────────── */
+.quote{
+  position:relative;
+  padding-left:1.9rem;
+  border-left:1px solid rgba(198,164,107,.5);
+}
+.quote::before{
+  content:'“';                 /* U+201C — открывающая кавычка */
+  position:absolute;
+  left:.55rem; top:-.34em;
+  /* Manrope: у него кавычка — однозначная пара штрихов.
+     У Cormorant она заметно закручена и на крупном кегле спорит с текстом. */
+  font-family:Manrope, system-ui, sans-serif;
+  font-weight:700;
+  font-size:2.2rem;
+  line-height:1;
+  color:rgba(198,164,107,.5);
+  pointer-events:none;
+}
+@media (min-width:768px){
+  .quote{ padding-left:2.1rem; }
+  .quote::before{ font-size:2.6rem; left:.7rem; }
+}
+
+/* Слой UI — строго нижняя треть кадра */
+.hero-ui{
+  position:absolute; left:0; right:0; bottom:0;
+  z-index:3;
+  padding:0 1.25rem calc(2rem + env(safe-area-inset-bottom));
+  display:flex; flex-direction:column; align-items:center;
+  text-align:center;
+  pointer-events:none;
+}
+.hero-ui > *{ pointer-events:auto; }
+
+@media (max-width:767px){
+  .hero-ui{ max-height:32vh; justify-content:flex-end; padding-bottom:calc(1.5rem + env(safe-area-inset-bottom)); }
+}
+
+/* Фазовые слои накладываются друг на друга в одной точке */
+.hero-layer{ position:absolute; left:0; right:0; bottom:0; }
+
+#heroScrollHint{
+  padding-bottom:calc(2.25rem + env(safe-area-inset-bottom));
+}
+.hint-line{
+  width:1px; height:44px; margin:.75rem auto 0;
+  background:linear-gradient(to bottom, rgba(198,164,107,0), var(--gold));
+  position:relative; overflow:hidden;
+}
+.hint-line::after{
+  content:''; position:absolute; left:0; top:0; width:100%; height:40%;
+  background:var(--gold);
+  animation:hintRun 1.9s cubic-bezier(.4,0,.2,1) infinite;
+}
+@keyframes hintRun{ 0%{ transform:translateY(-110%);} 100%{ transform:translateY(260%);} }
+
+.hero-title{
+  /* 6.4vw держит «ЗОЛОТОЙ СЕЗОН / ТВОЕГО ТЕЛА» ровно в 2 строки на телефоне */
+  font-size:clamp(1.32rem, 5.6vw, 3.4rem);
+  color:#FFF8F0;
+  text-shadow:0 1px 2px rgba(58,47,42,.5), 0 4px 28px rgba(58,47,42,.6);
+}
+.hero-sub{
+  font-size:clamp(.74rem, 1.9vw, 1rem);
+  color:rgba(255,248,240,.94);
+  letter-spacing:.06em;
+  text-shadow:0 1px 12px rgba(58,47,42,.7);
+}
+
+/* Плашка подсказки: читается и на светлом платье, и на тёмной вуали */
+.hint-pill{
+  background:rgba(255,248,240,.62);
+  border:1px solid rgba(255,248,240,.55);
+  backdrop-filter:blur(10px) saturate(120%);
+  -webkit-backdrop-filter:blur(10px) saturate(120%);
+  border-radius:999px;
+  padding:.5rem 1.1rem;
+  color:var(--ink);
+}
+
+/* Плашка оффера в hero */
+.hero-offer{
+  background:rgba(255,248,240,.62);
+  border:1px solid rgba(255,248,240,.5);
+  backdrop-filter:blur(16px) saturate(120%);
+  -webkit-backdrop-filter:blur(16px) saturate(120%);
+}
+
+/* ── Кнопки ──────────────────────────────────────────────────── */
+.btn{
+  min-height:48px;
+  display:inline-flex; align-items:center; justify-content:center;
+  font-family:Manrope, sans-serif; font-weight:600;
+  letter-spacing:.05em;
+  border-radius:999px;
+  transition:transform .25s ease, box-shadow .25s ease, background-color .25s ease, opacity .25s ease;
+}
+.btn:active{ transform:scale(.975); }
+
+.btn-primary{
+  background:var(--berry); color:#FFF8F0;
+  box-shadow:0 10px 26px -12px rgba(216,67,116,.75);
+}
+.btn-primary:hover{ background:#c53a68; box-shadow:0 14px 30px -12px rgba(216,67,116,.85); }
+
+.btn-secondary{
+  background:transparent; color:var(--ink);
+  border:1px solid var(--rose);
+}
+.btn-secondary:hover{ background:rgba(183,110,121,.09); }
+
+.btn[disabled], .btn.is-disabled{
+  opacity:.42; pointer-events:none; filter:saturate(.4);
+}
+
+/* ── Монограмма клуба (заглушка вместо фото) ─────────────────── */
+.monogram-panel{
+  background:
+    radial-gradient(120% 90% at 50% 12%, rgba(255,248,240,.72), rgba(255,248,240,0) 62%),
+    var(--cyc);
+  border:1px solid rgba(198,164,107,.55);
+  position:relative;
+  aspect-ratio:4/5;
+}
+.monogram-panel::after{
+  content:''; position:absolute; inset:10px;
+  border:1px solid rgba(198,164,107,.32);
+  pointer-events:none;
+}
+.monogram{
+  font-family:"Cormorant Garamond", Georgia, serif;
+  font-size:clamp(4.5rem, 16vw, 9rem);
+  letter-spacing:.08em; font-weight:300;
+  color:var(--gold);
+  line-height:1;
+}
+
+/* ── Таймер ──────────────────────────────────────────────────── */
+.tick{
+  font-family:Manrope, sans-serif;
+  font-variant-numeric:tabular-nums;
+  font-weight:600;
+  font-size:clamp(1.4rem, 5vw, 2.1rem);
+  color:var(--ink); line-height:1;
+}
+.tick-label{
+  font-size:.62rem; letter-spacing:.18em; text-transform:uppercase;
+  color:rgba(58,47,42,.5); margin-top:.4rem;
+}
+
+/* ── Прелоадер ───────────────────────────────────────────────── */
+#preloader{
+  position:fixed; inset:0; z-index:9999;
+  background:var(--cyc);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.5rem;
+  transition:opacity .4s ease;
+}
+#preloader.is-gone{ opacity:0; pointer-events:none; }
+.ring-track{ stroke:rgba(198,164,107,.22); }
+.ring-fill{
+  stroke:var(--gold);
+  stroke-linecap:round;
+  transform:rotate(-90deg); transform-origin:50% 50%;
+  /* значение ведёт rAF в JS — CSS-транзишен здесь только тормозил бы кольцо */
+}
+
+/* ═══ ПРАЗДНИЧНЫЙ ФОН: СЕРПАНТИН + ЗОЛОТАЯ ПЫЛЬ ═══════════════
+   Только для блоков после hero. Ноль картинок — SVG-кривые и точки.
+   Движение исключительно на transform/opacity (компози́тор),
+   поэтому скраб видео на главной не конкурирует с фоном за main thread. */
+
+.has-decor{ position:relative; overflow:hidden; }
+
+/* Контент секции обязан лежать ВЫШЕ декора.
+   Правило намеренно ограничено .has-decor: у #hero ребёнок — position:sticky,
+   и назначение ему position:relative сломало бы прилипание. */
+.has-decor > *:not(.sec-decor){ position:relative; z-index:1; }
+
+.sec-decor{
+  position:absolute; inset:0;
+  z-index:0;
+  pointer-events:none;
+  overflow:hidden;
+  /* Размеры спрайтов заданы в em. Меняя тут font-size, масштабируем весь
+     декор одним числом — без пересборки DOM при ресайзе. */
+  font-size:1px;
+}
+@media (max-width:767px){
+  .sec-decor{ font-size:.58px; opacity:.8; }
+}
+
+/* Два слоя с разной скоростью — из этого и рождается глубина */
+.decor-layer{ position:absolute; inset:-18% 0; }
+
+/* ── Фольговая чешуйка: реальный спрайт с прозрачным фоном ──
+   Два вложенных слоя, чтобы трансформы не дрались:
+   .foil       — сносит по вертикали (дрейф)
+   .foil-inner — крутит и переворачивает через rotateY (фольга ловит свет) */
+.foil{ position:absolute; will-change:transform; }
+.foil-inner{ transform-style:preserve-3d; }
+.foil img{
+  display:block; width:100%; height:auto;
+  /* лёгкая тёплая подсветка, чтобы спрайт сел в бежевую палитру */
+  filter:saturate(1.05) drop-shadow(0 1px 2px rgba(58,47,42,.10));
+}
+
+@keyframes foilDrift{
+  0%,100%{ transform:translate3d(0,0,0); }
+  50%    { transform:translate3d(var(--sway), var(--drift), 0); }
+}
+.foil{ animation:foilDrift var(--dur) ease-in-out infinite; animation-delay:var(--delay); }
+
+/* Не полный оборот: на 90° спрайт встаёт ребром и схлопывается в щепку.
+   Качаем в пределах ±--tilt, чтобы фольга всё время показывала лицо. */
+@keyframes foilSpin{
+  0%,100%{ transform:rotate(var(--rot)) rotateY(calc(var(--tilt) * -1)); }
+  50%    { transform:rotate(var(--rot)) rotateY(var(--tilt)); }
+}
+.foil-inner{ animation:foilSpin var(--spin) ease-in-out infinite; animation-delay:var(--spin-delay); }
+
+/* ── Блик: четырёхлучевая вспышка, мягко разгорается и гаснет ── */
+.spark{ position:absolute; will-change:transform,opacity; opacity:0; }
+.spark svg{ display:block; width:100%; height:auto; }
+
+@keyframes sparkTwinkle{
+  0%,  100%{ transform:scale(.35) rotate(0deg);   opacity:0; }
+  45%      { transform:scale(1)   rotate(60deg);  opacity:var(--peak); }
+  60%      { transform:scale(.92) rotate(80deg);  opacity:calc(var(--peak) * .75); }
+}
+.spark{ animation:sparkTwinkle var(--dur) ease-in-out infinite; animation-delay:var(--delay); }
+
+@keyframes dustFloat{
+  0%,100%{ transform:translate3d(0,0,0); }
+  50%    { transform:translate3d(0,var(--drift),0); }
+}
+.dust{ animation:dustFloat var(--dur) ease-in-out infinite; animation-delay:var(--delay); }
+
+/* Плавное появление секций.
+   ВАЖНО: по умолчанию контент ВИДЕН. Скрывает его только класс .js-ready,
+   который ставит инлайн-скрипт в <head> и снимает аварийный таймер.
+   Иначе падение GSAP с CDN (блокировщик, сеть) оставило бы пол-страницы
+   невидимой навсегда. */
+.reveal{ opacity:1; transform:none; }
+.js-ready .reveal{ opacity:0; transform:translateY(26px); }
+
+/* ── prefers-reduced-motion ──────────────────────────────────── */
+@media (prefers-reduced-motion:reduce){
+  html{ scroll-behavior:auto; }
+  .foil, .foil-inner, .spark, .dust{ animation:none !important; }
+  .spark{ opacity:var(--peak); }
+  #hero{ height:auto; }
+  .hero-sticky{ position:relative; height:100svh; }
+  .hint-line::after{ animation:none; }
+  .js-ready .reveal{ opacity:1 !important; transform:none !important; }
+}
+</style>
+</head>
+
+<body>
+
+<!-- ═══════════════ ПРЕЛОАДЕР ═══════════════ -->
+<div id="preloader">
+  <div class="relative">
+    <svg width="86" height="86" viewBox="0 0 86 86" aria-hidden="true">
+      <circle class="ring-track" cx="43" cy="43" r="38" fill="none" stroke-width="1.5"/>
+      <circle id="ringFill" class="ring-fill" cx="43" cy="43" r="38" fill="none" stroke-width="1.5"
+              stroke-dasharray="238.76" stroke-dashoffset="238.76"/>
+    </svg>
+    <div class="absolute inset-0 flex items-center justify-center">
+      <span id="preCount" class="font-display text-[1.35rem] text-ink tracking-widest">0%</span>
+    </div>
+  </div>
+  <p class="font-sans text-[.72rem] tracking-[.2em] uppercase text-ink/55 text-center px-6">
+    Заряжаем хлопушки к 15 сентября…
+  </p>
+</div>
+
+
+<!-- ═══════════════ HERO — СКРОЛЛ ПО ВИДЕО ═══════════════ -->
+<section id="hero" aria-label="Светлана Битт — золотой сезон твоего тела">
+  <div class="hero-sticky">
+
+    <!-- Постер: держит кадр, пока видео не готово -->
+    <!-- src подставляет JS по брейкпоинту; без пустого src, чтобы не было лишнего запроса -->
+    <img id="heroPoster" alt="" aria-hidden="true" decoding="async">
+
+    <!-- Видео: src/poster подставляет JS по брейкпоинту -->
+    <video id="heroVideo"
+           muted playsinline webkit-playsinline
+           preload="auto" disablepictureinpicture
+           aria-hidden="true"></video>
+
+    <div id="heroVeil"></div>
+
+    <!-- Шапка hero: логотип и строка клуба. Живёт отдельно от .hero-ui,
+         потому что та прижата к низу кадра. -->
+    <div class="hero-top">
+      <span class="hero-logo" aria-hidden="true"></span>
+      <span class="hero-rule" aria-hidden="true"></span>
+      <span class="hero-club">Международный женский клуб<br>«Вечная фаза»</span>
+    </div>
+
+    <div class="hero-ui">
+
+      <!-- ФАЗА 1 (0–20%) · «Крути вниз» -->
+      <div id="heroScrollHint" class="hero-layer flex flex-col items-center">
+        <span class="hint-pill font-sans text-[.68rem] md:text-xs tracking-[.28em] uppercase">
+          Крути вниз ↓
+        </span>
+        <div class="hint-line"></div>
+      </div>
+
+      <!-- ФАЗА 3 (45–75%) · Заголовок -->
+      <div id="heroTitleWrap" class="hero-layer flex flex-col items-center gap-1.5 md:gap-3 pb-6 md:pb-12">
+        <h1 class="h-display hero-title w-full px-1">
+          Акция в честь<br class="md:hidden"> дня рождения<br>Светланы Битт
+        </h1>
+        <p class="hero-sub font-sans w-full px-2 max-w-[46ch] md:max-w-[62ch]">
+          Праздничное продление доступа в клуб «Вечная фаза»
+          на специальных условиях. Только для действующих резидентов.
+        </p>
+      </div>
+
+      <!-- ФАЗА 4 (75–100%) · Плашка оффера -->
+      <div id="heroOffer" class="hero-layer flex flex-col items-center gap-3 pb-6 md:pb-9">
+        <a href="#offer" class="btn btn-primary px-7 py-3.5 text-[.82rem] md:text-sm">
+          Выбрать тариф для продления
+        </a>
+        <a href="#quote" class="font-sans text-[.62rem] tracking-[.24em] uppercase text-[#FFF8F0]/85 drop-shadow-[0_2px_12px_rgba(58,47,42,.6)]">
+          дальше ↓
+        </a>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════ БЛОК 2 · ОБРАЩЕНИЕ К РЕЗИДЕНТАМ ═══════════════ -->
+<section id="quote" class="px-5 md:px-8 py-24 md:py-36">
+  <div class="max-w-5xl mx-auto grid gap-10 md:gap-14 md:grid-cols-[minmax(0,.85fr)_minmax(0,1fr)] md:items-center">
+
+    <!-- Портрет Светланы -->
+    <figure class="reveal m-0">
+      <div class="portrait-frame rounded-2xl overflow-hidden">
+        <img src="sveta_img/sveta_quote.jpg" alt="Светлана Битт"
+             width="900" height="1200" decoding="async">
+      </div>
+    </figure>
+
+    <div>
+      <p class="reveal font-sans text-[.62rem] tracking-[.3em] uppercase text-rose mb-7">
+        Обращение к резидентам
+      </p>
+
+      <blockquote class="reveal quote m-0">
+        <p class="font-display text-[1.32rem] md:text-[1.72rem] leading-[1.5] text-ink">
+          В честь дня рождения я хочу порадовать тех, кто уже стал частью моей семьи.
+          Я открываю доступ в клуб «Вечная фаза» по специальной праздничной стоимости.
+          Это мой способ сказать Вам спасибо за доверие.
+        </p>
+      </blockquote>
+
+      <figcaption class="reveal font-sans text-[.68rem] tracking-[.22em] uppercase text-ink/45 mt-8">
+        Светлана Битт · основатель клуба
+      </figcaption>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════ БЛОК 3 · УСЛОВИЯ И ТАРИФЫ ═══════════════ -->
+<section id="offer" class="px-5 md:px-8 py-20 md:py-32">
+  <div class="max-w-3xl mx-auto text-center">
+
+    <h2 class="reveal h-display text-[1.9rem] md:text-[3rem] text-ink mb-5">
+      Праздничные условия продления
+    </h2>
+    <p class="reveal font-sans text-sm md:text-base text-ink/60 mb-12">
+      Выберите формат и оставайтесь в клубе
+    </p>
+
+    <!-- Тариф -->
+    <div class="reveal glass rounded-3xl px-6 py-11 md:px-14 md:py-14">
+
+      <p class="font-sans text-[.62rem] tracking-[.3em] uppercase text-rose mb-6">Тариф</p>
+
+      <h3 class="h-display text-[2.1rem] md:text-[3rem] text-ink mb-5">Пакет 3 + 1</h3>
+
+      <p class="font-sans text-sm md:text-base text-ink/65 max-w-[40ch] mx-auto leading-relaxed mb-11">
+        При приобретении доступа на 3 месяца — 4-й месяц в подарок.
+      </p>
+
+      <!-- Таймер -->
+      <div id="timerBlock">
+        <p class="font-sans text-[.62rem] tracking-[.26em] uppercase text-ink/45 mb-5">
+          До конца акции
+        </p>
+        <div id="timer" class="flex items-start justify-center gap-5 md:gap-9 mb-11">
+          <div><div class="tick" id="tDays">00</div><div class="tick-label">дней</div></div>
+          <div><div class="tick" id="tHours">00</div><div class="tick-label">часов</div></div>
+          <div><div class="tick" id="tMins">00</div><div class="tick-label">минут</div></div>
+          <div><div class="tick" id="tSecs">00</div><div class="tick-label">секунд</div></div>
+        </div>
+      </div>
+
+      <!-- Показывается, если дата прошла -->
+      <div id="timerClosed" class="hidden mb-11">
+        <p class="h-display text-2xl md:text-3xl text-ink/70">Набор закрыт</p>
+        <p class="font-sans text-xs text-ink/45 mt-3">Следующий поток — совсем скоро.</p>
+      </div>
+
+      <!-- TODO: заменить на Telegram / форму заявки -->
+      <a href="#cta" id="offerCta" class="btn btn-primary w-full sm:w-auto px-10 py-4 text-sm">
+        Получить индивидуальное предложение
+      </a>
+    </div>
+
+    <p class="reveal font-sans text-[.72rem] text-ink/45 mt-8 max-w-[52ch] mx-auto leading-relaxed">
+      Акция действует только для резидентов клуба и закроется 15.09.2026, 23:59 МСК.
+    </p>
+  </div>
+</section>
+
+
+<!-- ═══════════════ БЛОК 5 · ФИНАЛ ═══════════════ -->
+<section id="cta" class="px-5 md:px-8 py-20 md:py-32">
+  <div class="max-w-3xl mx-auto text-center">
+    <h2 class="reveal h-display text-[1.9rem] md:text-[3rem] text-ink mb-5">
+      С днём рождения, Светлана
+    </h2>
+    <p class="reveal font-sans text-sm md:text-base text-ink/60 max-w-[40ch] mx-auto leading-relaxed mb-12">
+      Продлите доступ на праздничных условиях — или просто поздравьте человека,
+      который держит клуб живым.
+    </p>
+
+    <div class="reveal flex flex-col md:flex-row items-stretch md:items-center justify-center gap-4">
+      <!-- TODO: заменить на Telegram / форму оплаты -->
+      <a href="#offer" id="finalCta" class="btn btn-primary px-9 py-4 text-sm">
+        Выбрать тариф для продления
+      </a>
+
+      <button id="congratsBtn" type="button" class="btn btn-secondary px-9 py-4 text-sm">
+        Поздравить Светлану 🥂
+      </button>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════ ФУТЕР ═══════════════ -->
+<footer class="px-5 md:px-8 pb-14 pt-8">
+  <div class="max-w-3xl mx-auto text-center border-t border-rose/15 pt-8">
+    <p class="font-sans text-[.7rem] text-ink/45 leading-relaxed">
+      © Светлана Битт, клуб «Вечная фаза».<br>
+      Не является медицинской услугой.
+    </p>
+  </div>
+</footer>
+
+
+<!-- ═══════════════ БИБЛИОТЕКИ ═══════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+<script>
+(function () {
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════════
+   0. КОНСТАНТЫ И ССЫЛКИ НА DOM
+   ═══════════════════════════════════════════════════════════════ */
+
+// Папка с ассетами относительно index.html.
+// Если положить index.html рядом с mp4/png — поставить пустую строку ''.
+const ASSET_DIR = 'sveta_img/';
+
+const SOURCES = {
+  mobile: { video: ASSET_DIR + 'mobile_version.mp4', poster: ASSET_DIR + 'hero_poster_mobile.jpg' },
+  desktop:{ video: ASSET_DIR + 'pc_version.mp4',     poster: ASSET_DIR + 'hero_poster_pc.jpg'     }
+};
+
+const FALLBACK_DURATION = 10;      // сек — если метаданные не пришли
+const PRELOAD_TIMEOUT   = 8000;    // мс — жёсткий потолок прелоадера
+const PRELOAD_MIN       = 1900;    // мс — минимум на экране, иначе на быстрой
+                                   //      сети кольцо мелькает за один кадр
+
+const video   = document.getElementById('heroVideo');
+const poster  = document.getElementById('heroPoster');
+const veil    = document.getElementById('heroVeil');
+const hint    = document.getElementById('heroScrollHint');
+const titleW  = document.getElementById('heroTitleWrap');
+const offerW  = document.getElementById('heroOffer');
+
+const preloader = document.getElementById('preloader');
+const ringFill  = document.getElementById('ringFill');
+const preCount  = document.getElementById('preCount');
+
+const RING_LEN = 238.76;           // 2πr при r=38
+
+const mqDesktop = window.matchMedia('(min-width: 768px)');
+const mqReduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+let currentMode   = null;          // 'mobile' | 'desktop'
+let videoDuration = FALLBACK_DURATION;
+let videoReady    = false;
+let scrubTrigger  = null;
+let heroTimeline  = null;
+
+
+/* ═══════════════════════════════════════════════════════════════
+   1. ВЫБОР ИСТОЧНИКА ВИДЕО ПО БРЕЙКПОИНТУ
+   Грузим ровно один ролик — никогда оба сразу.
+   ═══════════════════════════════════════════════════════════════ */
+
+function pickMode() {
+  return mqDesktop.matches ? 'desktop' : 'mobile';
+}
+
+function applySource(mode) {
+  if (mode === currentMode) return false;   // уже стоит нужный — ничего не делаем
+  currentMode = mode;
+
+  const src = SOURCES[mode];
+
+  poster.src = src.poster;
+  video.poster = src.poster;
+
+  // reduced-motion: видео вообще не грузим, живём на постере
+  if (mqReduced.matches) return true;
+
+  video.src = src.video;
+  video.load();
+  return true;
+}
+
+/* Смена брейкпоинта — меняем src один раз, потом refresh */
+function onBreakpointChange() {
+  const next = pickMode();
+  if (next === currentMode) return;
+
+  videoReady = false;
+  poster.classList.remove('is-hidden');
+
+  applySource(next);
+
+  // после смены источника пересчитываем позиции
+  video.addEventListener('loadedmetadata', function once() {
+    video.removeEventListener('loadedmetadata', once);
+    readDuration();
+    if (window.ScrollTrigger) ScrollTrigger.refresh();
+  });
+}
+
+if (mqDesktop.addEventListener) {
+  mqDesktop.addEventListener('change', onBreakpointChange);
+} else {
+  mqDesktop.addListener(onBreakpointChange);           // старые Safari
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   2. ПРЕЛОАДЕР — настоящий, без фейкового setInterval
+   Ждём: шрифты + постер + canplaythrough видео. Потолок 8с.
+   ═══════════════════════════════════════════════════════════════ */
+
+let loadedCount   = 0;
+let totalTasks    = 3;
+let preloaderDone = false;   // фейд уже запущен
+let forceFull     = false;   // пора дотянуть кольцо до 100%
+let realRatio     = 0;       // сколько реально загружено (0..1)
+let shownRatio    = 0;       // сколько показано на кольце (догоняет realRatio)
+let startedAt     = 0;
+
+function bumpProgress() {
+  loadedCount = Math.min(loadedCount + 1, totalTasks);
+  realRatio = loadedCount / totalTasks;
+}
+
+function paintProgress(ratio) {
+  const pct = Math.round(ratio * 100);
+  preCount.textContent = pct + '%';
+  ringFill.setAttribute('stroke-dashoffset', String(RING_LEN * (1 - ratio)));
+}
+
+/* Кольцо ведёт rAF, а не CSS-транзишен.
+   Цель = минимум из двух величин:
+     realRatio           — честная доля загруженного,
+     elapsed/PRELOAD_MIN — сколько прошло от минимальной выдержки.
+   Прогресс никогда не обгоняет реальную загрузку, но и не перескакивает
+   с 0% на 100% за кадр: три задачи больше не дают три рывка. */
+function animateRing() {
+  if (preloaderDone) return;                 // фейд пошёл — цикл больше не нужен
+  const elapsed = performance.now() - startedAt;
+  const target  = forceFull ? 1 : Math.min(realRatio, elapsed / PRELOAD_MIN);
+
+  shownRatio += (target - shownRatio) * 0.14;          // мягкое приближение
+  if (target - shownRatio < 0.004) shownRatio = target; // добиваем хвост
+  paintProgress(shownRatio);
+
+  if (forceFull && shownRatio > 0.999) { finishPreloader(); return; }
+  requestAnimationFrame(animateRing);
+}
+
+/* Промис на загрузку шрифтов */
+function waitFonts() {
+  if (!document.fonts || !document.fonts.ready) return Promise.resolve();
+  return document.fonts.ready;
+}
+
+/* Промис на загрузку постера */
+function waitPoster() {
+  return new Promise(function (resolve) {
+    if (poster.complete && poster.naturalWidth > 0) return resolve();
+    poster.addEventListener('load',  resolve, { once: true });
+    poster.addEventListener('error', resolve, { once: true });  // не блокируем страницу
+  });
+}
+
+/* Промис на готовность видео к скрабу */
+function waitVideo() {
+  return new Promise(function (resolve) {
+    if (mqReduced.matches) return resolve();             // видео не грузим вовсе
+    if (video.readyState >= 4) { videoReady = true; return resolve(); }
+
+    video.addEventListener('canplaythrough', function () {
+      videoReady = true; resolve();
+    }, { once: true });
+
+    // если ролик не отдался (кодек/сеть) — идём дальше на постере
+    video.addEventListener('error', resolve, { once: true });
+  });
+}
+
+/* Сигнал «пора закрываться»: кольцо доводит rAF, чтобы 100%
+   не появлялись рывком с текущего значения.
+   Страховка: в фоновой вкладке rAF душится или встаёт совсем, поэтому
+   дублируем закрытие таймером — finishPreloader идемпотентен. */
+function hidePreloader() {
+  if (forceFull) return;
+  forceFull = true;
+  setTimeout(finishPreloader, 450);
+}
+
+/* Собственно уход с экрана — вызывается из animateRing на 100% */
+function finishPreloader() {
+  if (preloaderDone) return;
+  preloaderDone = true;
+
+  paintProgress(1);
+  preloader.classList.add('is-gone');
+  window.scrollTo(0, 0);
+
+  setTimeout(function () {
+    preloader.remove();
+    if (window.ScrollTrigger) ScrollTrigger.refresh();
+  }, 420);
+}
+
+function startPreloader() {
+  startedAt = performance.now();
+  paintProgress(0);
+  requestAnimationFrame(animateRing);
+
+  const tasks = [
+    waitFonts().then(bumpProgress),
+    waitPoster().then(bumpProgress),
+    waitVideo().then(bumpProgress)
+  ];
+
+  // Минимальная выдержка: на localhost всё готово за ~200мс,
+  // без неё прелоадер просто моргает.
+  const minHold = new Promise(function (r) { setTimeout(r, PRELOAD_MIN); });
+
+  // Гонка: (всё загрузилось И выдержка прошла) ИЛИ вышло 8 секунд.
+  // Потолок остаётся жёстким — висеть вечно страница не будет.
+  Promise.race([
+    Promise.all([Promise.all(tasks), minHold]),
+    new Promise(function (r) { setTimeout(r, PRELOAD_TIMEOUT); })
+  ]).then(hidePreloader);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   3. СКРАБ ВИДЕО ПО СКРОЛЛУ
+   progress 0..1  →  video.currentTime = progress * duration
+   ═══════════════════════════════════════════════════════════════ */
+
+function readDuration() {
+  if (isFinite(video.duration) && video.duration > 0) {
+    videoDuration = video.duration;
+  }
+}
+
+/* Проставляем currentTime через rAF — не чаще кадра.
+   Это критично для iOS: частые seek подряд забивают декодер. */
+let targetTime = 0;
+let rafId = null;
+
+function queueTime(t) {
+  targetTime = t;
+  if (rafId === null) rafId = requestAnimationFrame(commitTime);
+}
+
+function commitTime() {
+  rafId = null;
+  if (!videoReady) return;
+
+  // не дёргаем декодер, если разница меньше половины кадра
+  if (Math.abs(video.currentTime - targetTime) < 0.02) return;
+
+  try {
+    video.currentTime = targetTime;
+  } catch (e) { /* seek до готовности — игнорируем */ }
+}
+
+function buildScrub() {
+  const scrubValue = mqDesktop.matches ? 0.4 : 0.15;
+  const proxy = { t: 0 };
+
+  // Отдельный триггер только под currentTime.
+  // transform/filter здесь НЕ трогаем — на iOS это душит скраб.
+  gsap.to(proxy, {
+    t: 1,
+    ease: 'none',
+    scrollTrigger: {
+      trigger: '#hero',
+      start: 'top top',
+      end: 'bottom bottom',
+      scrub: scrubValue,
+      invalidateOnRefresh: true
+    },
+    onUpdate: function () {
+      queueTime(proxy.t * videoDuration);
+    }
+  });
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   4. ТАЙМЛАЙН UI HERO
+   Отдельная timeline длиной ровно 1 — позиции = доли прогресса.
+     0–20%   подсказка «Крути вниз»
+     20–45%  UI уходит, лицо чистое
+     45–75%  вуаль снизу + заголовок
+     75–100% плашка оффера
+   ═══════════════════════════════════════════════════════════════ */
+
+/* На сколько заголовок уходит вверх в фазе 4, чтобы подзаголовок
+   не заезжал под плашку оффера. На телефоне запас нужен больше. */
+function TITLE_LIFT() {
+  return mqDesktop.matches ? -88 : -100;
+}
+
+function buildHeroTimeline() {
+  gsap.set([titleW, offerW], { opacity: 0, y: 26 });
+  gsap.set(hint,  { opacity: 1, y: 0 });
+  gsap.set(veil,  { scaleY: 0 });
+
+  heroTimeline = gsap.timeline({
+    scrollTrigger: {
+      trigger: '#hero',
+      start: 'top top',
+      end: 'bottom bottom',
+      scrub: mqDesktop.matches ? 0.4 : 0.15,
+      invalidateOnRefresh: true
+    }
+  });
+
+  // Распорка: делает общую длительность ровно 1
+  heroTimeline.to({}, { duration: 1 }, 0);
+
+  // ФАЗА 1→2 (~14–22%): подсказка уходит перед выстрелом хлопушки
+  heroTimeline.to(hint, { opacity: 0, y: 14, duration: 0.08, ease: 'power1.out' }, 0.14);
+
+  // ФАЗА 3 (45–75%): вуаль поднимается снизу, верх кадра с лицом чистый
+  heroTimeline.fromTo(veil,
+    { scaleY: 0 },
+    { scaleY: 1, duration: 0.26, ease: 'power1.inOut' }, 0.45);
+
+  // Заголовок проявляется в нижней трети
+  heroTimeline.to(titleW,
+    { opacity: 1, y: 0, duration: 0.16, ease: 'power2.out' }, 0.50);
+
+  // ФАЗА 4 (75–100%): заголовок поднимается, освобождая место плашке оффера.
+  // Функция-значение пересчитывается на ScrollTrigger.refresh() (invalidateOnRefresh),
+  // поэтому смена брейкпоинта не оставляет старый сдвиг.
+  heroTimeline.to(titleW,
+    { y: TITLE_LIFT, duration: 0.18, ease: 'power1.inOut' }, 0.76);
+
+  heroTimeline.to(offerW,
+    { opacity: 1, y: 0, duration: 0.14, ease: 'power2.out' }, 0.79);
+}
+
+/* Статичный вариант: reduced-motion или видео не завелось */
+function showStaticHero() {
+  // Без GSAP плашки и так в дефолтном видимом состоянии — прятать их
+  // было некому, поэтому просто выходим и не роняем обработчик.
+  if (!window.gsap) return;
+
+  gsap.set(hint,   { opacity: 0 });
+  gsap.set(veil,   { scaleY: 1 });
+  gsap.set(titleW, { opacity: 1, y: TITLE_LIFT() });
+  gsap.set(offerW, { opacity: 1, y: 0 });
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   4.5 ПРАЗДНИЧНЫЙ ФОН: СЕРПАНТИН + ЗОЛОТАЯ ПЫЛЬ
+   Только секции после hero — на главной остаётся видео.
+   Генерируем в JS, чтобы не раздувать разметку и держать
+   плотность в одной константе.
+   ═══════════════════════════════════════════════════════════════ */
+
+const DECOR = {
+  sections: ['quote', 'offer', 'cta'],
+  foils:    11,    // фольговых чешуек на секцию
+  sparkles: 6,     // бликов на секцию
+  dust:     24,    // пылинок на секцию
+  gold:     '198,164,107',   // #C6A46B
+  cream:    '242,220,198',   // #F2DCC6
+  // Реальные спрайты с прозрачным фоном, сгенерированы в Higgsfield
+  files: [
+    'sveta_img/decor/foil_gold.png',
+    'sveta_img/decor/foil_rose.png',
+    'sveta_img/decor/foil_cream.png',
+    'sveta_img/decor/foil_curl.png'
+  ]
+};
+
+/* Детерминированный PRNG (mulberry32): раскладка одинакова при каждой
+   загрузке, иначе фон «прыгал» бы между заходами и при ресайзе. */
+function seededRandom(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* Раскладка с уводом к краям: центр колонки оставляем тексту,
+   декор обрамляет контент, а не лезет под него. */
+function edgeBiasedLeft(rnd) {
+  const r = rnd();
+  if (r < 0.40) return rnd() * 22;           // левое поле
+  if (r < 0.80) return 72 + rnd() * 20;      // правое поле
+  return 26 + rnd() * 44;                    // центр — заметно реже
+}
+
+/* Для фольги правило жёстче: это крупные непрозрачные объекты, и над
+   заголовком они мешают читать. Центр исключён полностью — чешуйки
+   живут только в полях по краям колонки. */
+function foilLeft(rnd) {
+  return rnd() < 0.5 ? rnd() * 14 : 84 + rnd() * 14;
+}
+
+/* Фольговая чешуйка. Внешний div дрейфует, внутренний крутится по
+   rotateY — плоский спрайт читается как переворачивающаяся фольга. */
+function makeFoil(rnd, layerIsNear) {
+  const wrap = document.createElement('div');
+  wrap.className = 'foil';
+
+  const size = layerIsNear ? 54 + rnd() * 46 : 28 + rnd() * 24;
+
+  wrap.style.left   = foilLeft(rnd).toFixed(1) + '%';
+  wrap.style.top    = (rnd() * 88).toFixed(1) + '%';
+  wrap.style.width  = size.toFixed(0) + 'em';   // em -> масштабируется медиазапросом
+  wrap.style.opacity = (layerIsNear ? 0.80 + rnd() * 0.20 : 0.34 + rnd() * 0.20).toFixed(2);
+  wrap.style.setProperty('--drift', (-10 - rnd() * 14).toFixed(1) + 'px');
+  wrap.style.setProperty('--sway',  (-5 + rnd() * 10).toFixed(1) + 'px');
+  wrap.style.setProperty('--dur',   (10 + rnd() * 8).toFixed(1) + 's');
+  wrap.style.setProperty('--delay', (-rnd() * 14).toFixed(1) + 's');
+
+  // Дальний слой чуть размыт — дешёвая, но убедительная глубина резкости
+  if (!layerIsNear) wrap.style.filter = 'blur(' + (0.6 + rnd() * 0.8).toFixed(1) + 'px)';
+
+  const inner = document.createElement('div');
+  inner.className = 'foil-inner';
+  inner.style.setProperty('--rot', (-50 + rnd() * 100).toFixed(1) + 'deg');
+  inner.style.setProperty('--tilt', (26 + rnd() * 20).toFixed(0) + 'deg');
+  inner.style.setProperty('--spin', (9 + rnd() * 11).toFixed(1) + 's');
+  inner.style.setProperty('--spin-delay', (-rnd() * 20).toFixed(1) + 's');
+
+  // Спираль (последний файл) — редкий акцент: в мелком размере она
+  // читается как колосок, поэтому основу держат плоские ленты.
+  const flat = DECOR.files.length - 1;
+  const pick = rnd() < 0.16 ? flat : Math.floor(rnd() * flat);
+
+  const img = document.createElement('img');
+  img.src = DECOR.files[pick];
+  img.alt = '';
+  img.decoding = 'async';
+  // Не lazy: уникальных файлов всего 4, а элементов 44 — все ссылаются на
+  // те же URL, поэтому запросов всё равно 4. Ленивость ничего не экономит,
+  // но ставит фон в зависимость от intersection-пайплайна. Просто снижаем
+  // приоритет, чтобы декор не конкурировал с постером и видео hero.
+  img.fetchPriority = 'low';
+
+  inner.appendChild(img);
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+/* Блик — четырёхлучевая вспышка с вогнутыми лучами (классический glint) */
+const SPARK_PATH = 'M12 0 C12.6 7.4 16.6 11.4 24 12 C16.6 12.6 12.6 16.6 12 24 ' +
+                   'C11.4 16.6 7.4 12.6 0 12 C7.4 11.4 11.4 7.4 12 0 Z';
+
+function makeSparkle(rnd, layerIsNear) {
+  const el = document.createElement('div');
+  el.className = 'spark';
+
+  const size = layerIsNear ? 12 + rnd() * 16 : 7 + rnd() * 8;
+  const color = rnd() > 0.4 ? DECOR.gold : DECOR.cream;
+
+  el.style.left   = edgeBiasedLeft(rnd).toFixed(1) + '%';
+  el.style.top    = (rnd() * 92).toFixed(1) + '%';
+  el.style.width  = size.toFixed(0) + 'em';
+  el.style.setProperty('--peak',  (layerIsNear ? 0.55 + rnd() * 0.35 : 0.28 + rnd() * 0.24).toFixed(2));
+  el.style.setProperty('--dur',   (4.5 + rnd() * 5).toFixed(1) + 's');
+  el.style.setProperty('--delay', (-rnd() * 9).toFixed(1) + 's');
+
+  el.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+                 '<path d="' + SPARK_PATH + '" fill="rgb(' + color + ')"/></svg>';
+  return el;
+}
+
+function makeDust(rnd, layerIsNear) {
+  const el = document.createElement('div');
+  el.className = 'dust';
+
+  const size = layerIsNear ? 3 + rnd() * 2.5 : 1.8 + rnd() * 1.8;
+  const op   = layerIsNear ? 0.38 + rnd() * 0.26 : 0.24 + rnd() * 0.20;
+  const color = rnd() > 0.5 ? DECOR.gold : DECOR.cream;
+
+  el.style.left   = edgeBiasedLeft(rnd).toFixed(1) + '%';
+  el.style.top    = (rnd() * 94).toFixed(1) + '%';
+  el.style.width  = size.toFixed(1) + 'px';
+  el.style.height = size.toFixed(1) + 'px';
+  el.style.background = 'rgba(' + color + ',' + op.toFixed(2) + ')';
+  el.style.setProperty('--drift', (-8 - rnd() * 12).toFixed(1) + 'px');
+  el.style.setProperty('--dur',   (9 + rnd() * 8).toFixed(1) + 's');
+  el.style.setProperty('--delay', (-rnd() * 14).toFixed(1) + 's');
+
+  return el;
+}
+
+function buildDecor() {
+  DECOR.sections.forEach(function (id, idx) {
+    const section = document.getElementById(id);
+    if (!section) return;
+
+    const rnd = seededRandom(1234 + idx * 977);   // своя раскладка на секцию
+
+    const wrap = document.createElement('div');
+    wrap.className = 'sec-decor';
+    wrap.setAttribute('aria-hidden', 'true');
+
+    const far  = document.createElement('div'); far.className  = 'decor-layer';
+    const near = document.createElement('div'); near.className = 'decor-layer';
+
+    for (let i = 0; i < DECOR.foils; i++) {
+      (i % 2 ? near : far).appendChild(makeFoil(rnd, i % 2 === 1));
+    }
+    for (let i = 0; i < DECOR.sparkles; i++) {
+      (i % 2 ? near : far).appendChild(makeSparkle(rnd, i % 2 === 1));
+    }
+    for (let i = 0; i < DECOR.dust; i++) {
+      (i % 2 ? near : far).appendChild(makeDust(rnd, i % 2 === 1));
+    }
+
+    wrap.appendChild(far);
+    wrap.appendChild(near);
+    section.classList.add('has-decor');
+    section.insertBefore(wrap, section.firstChild);
+
+    // Параллакс: слои проходят секцию с разной скоростью.
+    // yPercent, а не top — чтобы остаться на transform.
+    if (mqReduced.matches) return;
+
+    const st = { trigger: section, start: 'top bottom', end: 'bottom top', scrub: 0.6 };
+    gsap.fromTo(far,  { yPercent:  7 }, { yPercent:  -7, ease: 'none', scrollTrigger: st });
+    gsap.fromTo(near, { yPercent: 18 }, { yPercent: -18, ease: 'none', scrollTrigger: st });
+  });
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   5. ПОЯВЛЕНИЕ БЛОКОВ ПОСЛЕ HERO
+   ═══════════════════════════════════════════════════════════════ */
+
+function buildReveals() {
+  if (mqReduced.matches) return;
+
+  document.querySelectorAll('section:not(#hero)').forEach(function (section) {
+    const items = section.querySelectorAll('.reveal');
+    if (!items.length) return;
+
+    gsap.to(items, {
+      opacity: 1,
+      y: 0,
+      duration: 0.7,
+      ease: 'power2.out',
+      stagger: 0.12,
+      scrollTrigger: { trigger: section, start: 'top 78%', once: true }
+    });
+  });
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   6. ТАЙМЕР ДО 15 СЕНТЯБРЯ 2026, 23:59 (Europe/Moscow = UTC+3)
+   ═══════════════════════════════════════════════════════════════ */
+
+const DEADLINE = new Date('2026-09-15T23:59:00+03:00').getTime();
+
+const elDays  = document.getElementById('tDays');
+const elHours = document.getElementById('tHours');
+const elMins  = document.getElementById('tMins');
+const elSecs  = document.getElementById('tSecs');
+const timerBlock  = document.getElementById('timerBlock');
+const timerClosed = document.getElementById('timerClosed');
+const offerCta    = document.getElementById('offerCta');
+const finalCta    = document.getElementById('finalCta');
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function closeOffer() {
+  timerBlock.classList.add('hidden');
+  timerClosed.classList.remove('hidden');
+
+  [offerCta, finalCta].forEach(function (btn) {
+    if (!btn) return;
+    btn.classList.add('is-disabled');
+    btn.setAttribute('aria-disabled', 'true');
+    btn.removeAttribute('href');
+    btn.textContent = 'Набор закрыт';
+  });
+}
+
+function tickTimer() {
+  const left = DEADLINE - Date.now();
+
+  if (left <= 0) { closeOffer(); return false; }
+
+  const s = Math.floor(left / 1000);
+  elDays.textContent  = pad(Math.floor(s / 86400));
+  elHours.textContent = pad(Math.floor((s % 86400) / 3600));
+  elMins.textContent  = pad(Math.floor((s % 3600) / 60));
+  elSecs.textContent  = pad(s % 60);
+  return true;
+}
+
+function startTimer() {
+  if (!tickTimer()) return;
+  const id = setInterval(function () {
+    if (!tickTimer()) clearInterval(id);
+  }, 1000);
+}
+
+
+/* ═══════════════════════════════════════════════════════════════
+   7. КОНФЕТТИ — только по кнопке «Поздравить Светлану»
+   ═══════════════════════════════════════════════════════════════ */
+
+const PARTY_COLORS = ['#B76E79', '#C6A46B', '#F2DCC6', '#D84374', '#FFF8F0'];
+
+function celebrate() {
+  if (typeof confetti !== 'function') return;
+
+  const base = { colors: PARTY_COLORS, disableForReducedMotion: true, zIndex: 60 };
+
+  // Залп 1 — по центру снизу
+  confetti(Object.assign({}, base, {
+    particleCount: 70, spread: 70, startVelocity: 45, origin: { x: 0.5, y: 0.82 }
+  }));
+
+  // Залп 2 — слева
+  setTimeout(function () {
+    confetti(Object.assign({}, base, {
+      particleCount: 45, spread: 60, startVelocity: 38, origin: { x: 0.18, y: 0.85 }
+    }));
+  }, 180);
+
+  // Залп 3 — справа
+  setTimeout(function () {
+    confetti(Object.assign({}, base, {
+      particleCount: 45, spread: 60, startVelocity: 38, origin: { x: 0.82, y: 0.85 }
+    }));
+  }, 340);
+}
+
+document.getElementById('congratsBtn').addEventListener('click', celebrate);
+
+
+/* ═══════════════════════════════════════════════════════════════
+   8. СТАРТ
+   ═══════════════════════════════════════════════════════════════ */
+
+function init() {
+  /* ── ЭТАП 1: всё, что не зависит от GSAP ──────────────────────
+     Порядок принципиален. Если GSAP не приедет с CDN, регистрация
+     плагина ниже бросит исключение — но к этому моменту постер уже
+     стоит, таймер идёт, а прелоадер закрывается. Страница остаётся
+     рабочей, теряются только анимации. */
+
+  applySource(pickMode());
+
+  // Первый кадр отрисован — убираем постер
+  video.addEventListener('loadeddata', function () {
+    videoReady = true;
+    poster.classList.add('is-hidden');
+  });
+
+  // Кодек не поддержан или файл не дошёл — остаёмся на постере
+  video.addEventListener('error', function () {
+    videoReady = false;
+    poster.classList.remove('is-hidden');
+    showStaticHero();
+  });
+
+  startTimer();
+  startPreloader();
+
+  /* ── ЭТАП 2: анимации ───────────────────────────────────────── */
+
+  gsap.registerPlugin(ScrollTrigger);
+
+  // Метаданные → точная длительность → пересчёт позиций
+  video.addEventListener('loadedmetadata', function () {
+    readDuration();
+    ScrollTrigger.refresh();
+  });
+
+  if (mqReduced.matches) {
+    showStaticHero();               // без скраба, статичные блоки
+  } else {
+    buildHeroTimeline();
+    buildScrub();
+  }
+
+  buildDecor();
+  buildReveals();
+
+  // Пересчёт после полной загрузки страницы
+  window.addEventListener('load', function () { ScrollTrigger.refresh(); });
+}
+
+/* Любой сбой внутри init() не должен оставить страницу пустой */
+function safeInit() {
+  try {
+    init();
+  } catch (err) {
+    document.documentElement.classList.remove('js-ready');
+    const pre = document.getElementById('preloader');
+    if (pre) pre.remove();
+    if (window.console) console.error('init failed:', err);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', safeInit);
+} else {
+  safeInit();
+}
+
+})();
+</script>
+
+</body>
+</html>
