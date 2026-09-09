@@ -439,6 +439,14 @@ body{
   filter:saturate(1.05) drop-shadow(0 1px 2px rgba(58,47,42,.10));
 }
 
+/* Пока на экране первый экран с видео, декор не виден, но его анимации
+   продолжают крутиться и отбирают у телефона ресурсы, нужные декодеру.
+   Класс hero-on ставит ScrollTrigger — и всё замирает до выхода из hero. */
+.hero-on .foil,
+.hero-on .foil-inner,
+.hero-on .spark,
+.hero-on .dust{ animation-play-state:paused; }
+
 @keyframes foilDrift{
   0%,100%{ transform:translate3d(0,0,0); }
   50%    { transform:translate3d(var(--sway), var(--drift), 0); }
@@ -929,10 +937,30 @@ function readDuration() {
   }
 }
 
-/* Проставляем currentTime через rAF — не чаще кадра.
-   Это критично для iOS: частые seek подряд забивают декодер. */
+/* ── Перемотка с ожиданием декодера ──────────────────────────────
+   Главное правило: НИКОГДА не задавать новый currentTime, пока
+   предыдущая перемотка не завершилась.
+
+   Наивная версия ставила currentTime каждый кадр, до 60 раз в секунду.
+   На настольном компьютере декодер успевает, поэтому там всё ровно.
+   На телефоне один seek по кадру 1080x1920 занимает больше 16 мс,
+   запросы копятся в очередь, картинка отстаёт от пальца и дёргается.
+
+   Здесь запрос уходит только когда предыдущий отчитался событием
+   'seeked'. Промежуточные цели просто перезаписывают targetTime,
+   и после завершения мы прыгаем сразу на самую свежую. */
+
+const FRAME = 1 / 24;                 // ролики сняты в 24 кадрах в секунду
+
 let targetTime = 0;
-let rafId = null;
+let rafId      = null;
+let isSeeking  = false;
+
+/* Точнее одного кадра перематывать бессмысленно: нового изображения
+   это не даст, а декодер займёт. На телефоне порог выше. */
+function seekEpsilon() {
+  return mqDesktop.matches ? FRAME * 0.5 : FRAME;
+}
 
 function queueTime(t) {
   targetTime = t;
@@ -942,17 +970,47 @@ function queueTime(t) {
 function commitTime() {
   rafId = null;
   if (!videoReady) return;
+  if (isSeeking) return;              // декодер занят — цель уже сохранена
 
-  // не дёргаем декодер, если разница меньше половины кадра
-  if (Math.abs(video.currentTime - targetTime) < 0.02) return;
+  if (Math.abs(video.currentTime - targetTime) < seekEpsilon()) return;
 
   try {
     video.currentTime = targetTime;
   } catch (e) { /* seek до готовности — игнорируем */ }
 }
 
+/* Пока идёт перемотка, новые запросы не отправляем */
+video.addEventListener('seeking', function () { isSeeking = true; });
+
+/* Перемотка закончилась — если палец успел уйти дальше, догоняем одним прыжком */
+video.addEventListener('seeked', function () {
+  isSeeking = false;
+  if (Math.abs(video.currentTime - targetTime) >= seekEpsilon()) commitTime();
+});
+
+/* Гасим фоновые анимации на время первого экрана — см. .hero-on в CSS.
+   Намеренно на IntersectionObserver, а не на ScrollTrigger: вопрос
+   «виден ли сейчас первый экран» — ровно то, на что этот наблюдатель
+   и рассчитан. Он не зависит от внутреннего цикла GSAP и надёжно
+   срабатывает в обе стороны. */
+function buildDecorPause() {
+  const sticky = document.querySelector('.hero-sticky');
+  if (!sticky || typeof IntersectionObserver === 'undefined') return;
+
+  new IntersectionObserver(function (entries) {
+    document.documentElement.classList.toggle('hero-on', entries[0].isIntersecting);
+  }, { threshold: 0.01 }).observe(sticky);
+}
+
 function buildScrub() {
-  const scrubValue = mqDesktop.matches ? 0.4 : 0.15;
+  /* Сколько секунд видео догоняет палец.
+       больше — плавнее, но картинка заметнее отстаёт;
+       меньше — отзывчивее, но переходы резче.
+     Раньше на телефоне стояло 0.15: перемотки не успевали и копились
+     в очередь. Очередь теперь закрыта ожиданием 'seeked', поэтому
+     хватает умеренного сглаживания. Если на вашем телефоне всё ещё
+     не нравится — крутите это число. */
+  const scrubValue = mqDesktop.matches ? 0.4 : 0.3;
   const proxy = { t: 0 };
 
   // Отдельный триггер только под currentTime.
@@ -1375,6 +1433,8 @@ function init() {
     buildHeroTimeline();
     buildScrub();
   }
+
+  buildDecorPause();
 
   buildDecor();
   buildReveals();
